@@ -6,7 +6,6 @@
 
 #if !defined(rotator_hardware_h)   // can't touch this
 #define rotator_hardware_h         // can't touch this
-
 // #define HARDWARE_M0UPU          // customize rotator_features_m0upu.h, rotators_pins_m0upu.h, rotator_settings_m0upu.h
 // #define HARDWARE_WB6KCN         // customize rotator_features_wb6kcn.h, rotators_pins_wb6kcn.h, rotator_settings_wb6kcn.h
 // #define HARDWARE_WB6KCN_K3NG         // K3NG test jig - do not use
@@ -31,8 +30,10 @@
   #define CONTROL_PORT_SERIAL_PORT_CLASS Serial_                             // <- Arduino Leonardo, Micro, and Yún - Configure this
 #elif defined(ARDUINO_AVR_PROMICRO)  || defined(ARDUINO_AVR_ESPLORA) || defined(ARDUINO_AVR_LILYPAD_USB) || defined(ARDUINO_AVR_ROBOT_CONTROL) || defined(ARDUINO_AVR_ROBOT_MOTOR) || defined(ARDUINO_AVR_LEONARDO_ETH)
   #define CONTROL_PORT_SERIAL_PORT_CLASS Serial_
-#elif defined(TEENSYDUINO)
+#elif defined(TEENSYDUINO) 
   #define CONTROL_PORT_SERIAL_PORT_CLASS usb_serial_class
+#elif defined(ARDUINO_ARCH_RENESAS_UNO) 
+  #define CONTROL_PORT_SERIAL_PORT_CLASS _SerialUSB
 #else
   #define CONTROL_PORT_SERIAL_PORT_CLASS HardwareSerial
 #endif
