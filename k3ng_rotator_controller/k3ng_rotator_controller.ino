@@ -9444,7 +9444,7 @@ void output_debug(){
         }
         debug.println(F("DIRTY"));
 
-        #if !defined(TEENSYDUINO)
+        #if !defined(TEENSYDUINO) && !defined(ARDUINO_ARCH_RENESAS_UNO)  // Teensy and Renesas do not support this type of memory check
           void * HP = malloc(4);
           if (HP) {free(HP);}
           unsigned long free = (unsigned long)SP - (unsigned long)HP;
@@ -13401,6 +13401,11 @@ int analogReadEnhanced(uint8_t pin){
   #ifdef FEATURE_ADC_RESOLUTION12
     analogReadResolution(12);
   #endif
+
+  #ifdef FEATURE_ADC_RESOLUTION14
+    analogReadResolution(14);
+  #endif
+
 
   #ifdef OPTION_EXTERNAL_ANALOG_REFERENCE
     analogReference(EXTERNAL);

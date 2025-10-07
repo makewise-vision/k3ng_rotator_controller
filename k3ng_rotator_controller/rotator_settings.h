@@ -18,6 +18,14 @@
                                                 
 #define ELEVATION_MAXIMUM_DEGREES 180           // change this to set the maximum elevation in degrees
 
+#ifdef FEATURE_ADC_RESOLUTION14
+  #define MAX_ANALOG_READ 16383
+#elif FEATURE_ADC_RESOLUTION12
+  #define MAX_ANALOG_READ 4095
+#else
+  #define MAX_ANALOG_READ 1023
+#endif
+
 /* --------------------------- Settings ------------------------------------------------
 
 You can tweak these, but read the online documentation!
@@ -31,9 +39,11 @@ You can tweak these, but read the online documentation!
 // these correspond with the analog input voltage
 //  a value of 1 is approximately 0 volts, a value of 1024 is approximately 5 volts (or 3.3 volts on some boards)
 #define ANALOG_AZ_FULL_CCW_EEPROM_INITIALIZE 1
-#define ANALOG_AZ_FULL_CW_EEPROM_INITIALIZE 1023
+
+#define ANALOG_AZ_FULL_CW_EEPROM_INITIALIZE MAX_ANALOG_READ
+
 #define ANALOG_EL_FULL_DOWN_EEPROM_INITIALIZE 1
-#define ANALOG_EL_FULL_UP_EEPROM_INITIALIZE 1023
+#define ANALOG_EL_FULL_UP_EEPROM_INITIALIZE MAX_ANALOG_READ
 
 #define ANALOG_AZ_OVERLAP_DEGREES 540         // if overlap_led above is enabled, turn on overlap led line if azimuth is greater than this setting
                                               // you must use raw azimuth (if the azimuth on the rotator crosses over to 0 degrees, add 360
@@ -94,13 +104,13 @@ You can tweak these, but read the online documentation!
 
 // Speed pot settings
 #define SPEED_POT_LOW 0
-#define SPEED_POT_HIGH 1023
+#define SPEED_POT_HIGH MAX_ANALOG_READ
 #define SPEED_POT_LOW_MAP 1
 #define SPEED_POT_HIGH_MAP 255
 
 // Azimuth preset pot settings
 #define AZ_PRESET_POT_FULL_CW 0
-#define AZ_PRESET_POT_FULL_CCW 1023
+#define AZ_PRESET_POT_FULL_CCW MAX_ANALOG_READ
 #define AZ_PRESET_POT_FULL_CW_MAP 180         // azimuth pot fully counter-clockwise degrees
 #define AZ_PRESET_POT_FULL_CCW_MAP 630        // azimuth pot fully clockwise degrees
 
