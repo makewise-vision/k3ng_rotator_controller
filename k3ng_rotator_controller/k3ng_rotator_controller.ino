@@ -1338,8 +1338,8 @@ unsigned long az_last_step_time = 0;
 byte az_slow_down_step = 0;
 unsigned long az_timed_slow_down_start_time = 0;
 byte backslash_command = 0;
-byte normal_az_speed_voltage = 0;
-byte current_az_speed_voltage = 0;
+unsigned int normal_az_speed_voltage = 0;
+unsigned int  current_az_speed_voltage = 0;
 double latitude = DEFAULT_LATITUDE;
 double longitude = DEFAULT_LONGITUDE;
 double altitude_m = DEFAULT_ALTITUDE_M;
@@ -1428,8 +1428,8 @@ struct config_t {
   unsigned long el_last_step_time = 0;
   byte el_slow_down_step = 0;
   unsigned long el_timed_slow_down_start_time = 0;
-  byte normal_el_speed_voltage = 0;
-  byte current_el_speed_voltage = 0;
+  unsigned int  normal_el_speed_voltage = 0;
+  unsigned int  current_el_speed_voltage = 0;
   byte el_state = IDLE;
   int analog_el = 0;
   unsigned long el_last_rotate_initiation = 0;
@@ -1872,6 +1872,7 @@ struct config_t {
 
 void setup() {
 
+  
   initialize_serial();
 
   initialize_peripherals();
@@ -13147,6 +13148,17 @@ void check_limit_sense(){
       if (!az_limit_tripped) {
         submit_request(AZ, REQUEST_KILL, 0, 9);
         az_limit_tripped = 1;
+        #if defined(FEATURE_LIMIT_SENSE_AZ_CALIBRATE) && defined(FEATURE_AZ_POSITION_PULSE_INPUT)
+          az_position_pulse_input_azimuth = az_limit_calibration_angle;
+          configuration.last_azimuth= az_limit_calibration_angle ;
+          azimuth = az_limit_calibration_angle;
+          #ifdef DEBUG_LIMIT_SENSE
+            debug.print(F("check_limit_sense: az limit tripped, set azimuth to "));
+            debug.println(azimuth);
+          #endif // DEBUG_LIMIT_SENSE
+        #endif 
+        
+            
         #ifdef DEBUG_LIMIT_SENSE
           debug.print(F("check_limit_sense: az limit tripped\n"));
         #endif // DEBUG_LIMIT_SENSE
@@ -13162,6 +13174,16 @@ void check_limit_sense(){
       if (!el_limit_tripped) {
         submit_request(EL, REQUEST_KILL, 0, 10);
         el_limit_tripped = 1;
+        #if defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE) && defined(FEATURE_EL_POSITION_PULSE_INPUT)      
+            el_position_pulse_input_elevation = el_limit_calibration_angle;
+            configuration.last_elevation= el_limit_calibration_angle ;
+            elevation = el_limit_calibration_angle;
+            #ifdef DEBUG_LIMIT_SENSE
+              debug.print(F("check_limit_sense: el limit tripped, set elevation to "));
+              debug.println(azimuth);
+            #endif // DEBUG_LIMIT_SENSE
+        #endif 
+
         #ifdef DEBUG_LIMIT_SENSE
           debug.print(F("check_limit_sense: el limit tripped\n"));
         #endif // DEBUG_LIMIT_SENSE
@@ -13688,7 +13710,7 @@ byte get_analog_pin(byte pin_number){
     case 3: return_output = A3; break;
     case 4: return_output = A4; break;
     case 5: return_output = A5; break;
-    case 6: return_output = A6; break;
+   // case 6: return_output = A6; break;
   }
 
   return return_output;
@@ -18144,7 +18166,8 @@ void process_yaesu_command(byte * yaesu_command_buffer, int yaesu_command_buffer
 
         break;
         
-      #ifdef FEATURE_AZ_POSITION_POTENTIOMETER
+        
+      #if defined(FEATURE_AZ_POSITION_POTENTIOMETER) || defined(FEATURE_AZ_POSITION_PULSE_INPUT) 
         case 'O':  // O - offset calibration
           #ifdef DEBUG_PROCESS_YAESU
             if (debug_mode) {
@@ -18173,6 +18196,11 @@ void process_yaesu_command(byte * yaesu_command_buffer, int yaesu_command_buffer
                   get_keystroke();
                   read_elevation(1);
                   configuration.analog_el_0_degrees = analog_el;
+                  #ifdef FETURE_EL_POSITION_PULSE_INPUT
+                    el_position_pulse_input_elevation = 0;
+                    configuration.last_elevation=0;
+                    elevation = 0;
+                  #endif // FETURE_EL_POSITION_PULSE_INPUT
                   write_settings_to_eeprom();
                   strcpy(return_string,"Wrote to memory"); 
                 }             
@@ -18201,13 +18229,18 @@ void process_yaesu_command(byte * yaesu_command_buffer, int yaesu_command_buffer
               get_keystroke();
               read_azimuth(1);
               configuration.analog_az_full_ccw = analog_az;
+              #ifdef FEATURE_AZ_POSITION_PULSE_INPUT
+                  az_position_pulse_input_azimuth = 0;
+                  configuration.last_azimuth=0;
+                  azimuth = 0;
+              #endif // FEATURE_AZ_POSITION_PULSE_INPUT
               write_settings_to_eeprom();
               strcpy_P(return_string,(const char*) F("Wrote to memory"));
             }
           #endif
 
           break;
-        #endif // FEATURE_AZ_POSITION_POTENTIOMETER
+      #endif // FEATURE_AZ_POSITION_POTENTIOMETER
       
       case 'R':  // R - manual right (CW) rotation
         #ifdef DEBUG_PROCESS_YAESU
