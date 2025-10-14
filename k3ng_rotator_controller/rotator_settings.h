@@ -100,13 +100,13 @@ You can tweak these, but read the online documentation!
 
 // Settings for OPTION_EL_MANUAL_ROTATE_LIMITS
 #define EL_MANUAL_ROTATE_DOWN_LIMIT -1
-#define EL_MANUAL_ROTATE_UP_LIMIT 271
+#define EL_MANUAL_ROTATE_UP_LIMIT 120
 
 #ifdef FEATURE_LIMIT_SENSE_AZ_CALIBRATE
-  #define az_limit_calibration_angle AZIMUTH_STARTING_POINT_EEPROM_INITIALIZE
+  #define az_limit_calibration_angle 0
 #endif //FEATURE_LIMIT_SENSE_AZ_CALIBRATE
 #ifdef FEATURE_LIMIT_SENSE_EL_CALIBRATE
-  #define el_limit_calibration_angle ELEVATION_MAXIMUM_DEGREES
+  #define el_limit_calibration_angle 0
 #endif //FEATURE_LIMIT_SENSE_EL_CALIBRATE
 
 // Speed pot settings
@@ -192,7 +192,7 @@ You can tweak these, but read the online documentation!
 #define AZ_REMOTE_UNIT_QUERY_TIME_MS 150         // how often we query the remote remote for azimuth
 #define EL_REMOTE_UNIT_QUERY_TIME_MS 150         // how often we query the remote remote for elevation
 
-#define AZIMUTH_SMOOTHING_FACTOR 50.0      // value = 0 to 99.9
+#define AZIMUTH_SMOOTHING_FACTOR 0.0      // value = 0 to 99.9
 #define ELEVATION_SMOOTHING_FACTOR 0.0    // value = 0 to 99.9
 
 #define AZIMUTH_MEASUREMENT_FREQUENCY_MS 10        // this does not apply if using FEATURE_AZ_POSITION_GET_FROM_REMOTE_UNIT
