@@ -122,7 +122,7 @@
 #define FEATURE_LIMIT_SENSE
 #define FEATURE_LIMIT_SENSE_AZ_CALIBRATE
 #define FEATURE_LIMIT_SENSE_EL_CALIBRATE
-// #define FEATURE_TIMED_BUFFER           // Support for Yaesu timed buffer commands
+#define FEATURE_TIMED_BUFFER           // Support for Yaesu timed buffer commands
  #define OPTION_SERIAL_HELP_TEXT        // Yaesu help command prints help
 // #define FEATURE_PARK
 // #define FEATURE_AUTOPARK               // Requires FEATURE_PARK
@@ -141,7 +141,7 @@
 // #define OPTION_JOYSTICK_REVERSE_Y_AXIS
 #define OPTION_EL_SPEED_FOLLOWS_AZ_SPEED    // changing the azimith speed with Yaesu X commands or an azimuth speed pot will also change elevation speed
 // #define OPTION_PULSE_IGNORE_AMBIGUOUS_PULSES // for azimuth and elevation position pulse input feature, ignore pulses that arrive when no rotation is active
-#define OPTION_BUTTON_RELEASE_NO_SLOWDOWN  // disables slowdown when CW or CCW button is released, or stop button is depressed
+//#define OPTION_BUTTON_RELEASE_NO_SLOWDOWN  // disables slowdown when CW or CCW button is released, or stop button is depressed
 #define OPTION_SYNC_RTC_TO_GPS // if both realtime clock and GPS are present, synchronize realtime clock to GPS
 
 #define OPTION_DISPLAY_STATUS

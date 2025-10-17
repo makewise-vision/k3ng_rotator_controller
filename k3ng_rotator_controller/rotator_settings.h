@@ -124,7 +124,7 @@ You can tweak these, but read the online documentation!
 #define ENCODER_PRESET_TIMEOUT 5000
 
 // various code settings
-#define AZIMUTH_TOLERANCE 0.33            // rotator will stop within X degrees when doing autorotation
+#define AZIMUTH_TOLERANCE 1.0            // rotator will stop within X degrees when doing autorotation
 #define ELEVATION_TOLERANCE 0.33 //1.0
 
 #define OPERATION_TIMEOUT 120000        // timeout for any rotation operation in mS ; 120 seconds is usually enough unless you have the speed turned down
