@@ -95,8 +95,8 @@ You can tweak these, but read the online documentation!
 #define EL_VARIABLE_FREQ_OUTPUT_HIGH 1000   // Frequency in hertz of maximum speed (FEATURE_STEPPER_MOTOR maximum value: 2000 unless you change OPTION_STEPPER_MOTOR_MAX_X_KHZ in features file)
 
 // Settings for OPTION_AZ_MANUAL_ROTATE_LIMITS
-#define AZ_MANUAL_ROTATE_CCW_LIMIT 0   // if using a rotator that starts at 180 degrees, set this to something like 185
-#define AZ_MANUAL_ROTATE_CW_LIMIT 535  // add 360 to this if you go past 0 degrees (i.e. 180 CW after 0 degrees = 540)
+#define AZ_MANUAL_ROTATE_CCW_LIMIT -1   // if using a rotator that starts at 180 degrees, set this to something like 185
+#define AZ_MANUAL_ROTATE_CW_LIMIT 360  // add 360 to this if you go past 0 degrees (i.e. 180 CW after 0 degrees = 540)
 
 // Settings for OPTION_EL_MANUAL_ROTATE_LIMITS
 #define EL_MANUAL_ROTATE_DOWN_LIMIT -1
