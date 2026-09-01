@@ -61,6 +61,7 @@
 // #define DEBUG_A2_ENCODER_LOOPBACK_TEST
 // #define DEBUG_QMC5883
 // #define DEBUG_ROTATION_STALL_DETECTION
+// #define DEBUG_MOTION_PROFILE   // trapezoidal velocity profile: distance, commanded and measured velocity
 // #define DEBUG_NEXTION_DISPLAY
 // #define DEBUG_NEXTION_DISPLAY_SERIAL_SEND
 // #define DEBUG_NEXTION_DISPLAY_SERIAL_RECV

@@ -116,6 +116,13 @@
 #define OPTION_EL_POSITION_PULSE_HARD_LIMIT  // stop elevation at lower and upper limits rather than rolling over
 // #define OPTION_POSITION_PULSE_INPUT_PULLUPS  // define to enable weak pullups on position pulse inputs
 
+/* motion control */
+#define FEATURE_MOTION_PROFILE            // trapezoidal velocity profile with bounded acceleration/deceleration
+                                          // (settings are AZ/EL_MAX_ACCELERATION_DPSS, AZ/EL_MAX_DECELERATION_DPSS,
+                                          // AZ/EL_FULL_SPEED_DEG_PER_SEC in rotator_settings.h).  Replaces the
+                                          // timed slow start / slow down ramps; a new target arriving mid-rotation
+                                          // is blended into the current velocity rather than starting abruptly.
+
 /* less often used features and options */
 #define OPTION_GS_232B_EMULATION          // comment this out to default to Yaesu GS-232A emulation when using FEATURE_YAESU_EMULATION above
 // #define FEATURE_ROTATION_INDICATOR_PIN     // activate rotation_indication_pin to indicate rotation

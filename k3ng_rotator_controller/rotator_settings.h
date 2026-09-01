@@ -88,6 +88,49 @@ You can tweak these, but read the online documentation!
 
 #define TIMED_SLOW_DOWN_TIME 2000
 
+// Motion profile settings (FEATURE_MOTION_PROFILE) --------------------------------------------------
+// Trapezoidal velocity profile: the controller ramps velocity at a bounded acceleration instead of
+// stepping PWM on timers.  A new target arriving mid-rotation only changes the target - the current
+// velocity is preserved and the ramp is recalculated, so there is no abrupt jump or direction snap.
+// Deceleration distance is derived from the measured velocity (d = v^2 / (2*a)), not a fixed number
+// of degrees, so it stays correct at any speed.  These supersede SLOW_DOWN_BEFORE_TARGET_*,
+// AZ/EL_SLOW_DOWN_STEPS, AZ/EL_SLOW_START_UP_TIME and TIMED_SLOW_DOWN_TIME when the feature is on.
+
+// Maximum acceleration and deceleration, in degrees/second^2.  Lower = gentler, longer ramps.
+// Deceleration is usually set equal to or slightly higher than acceleration.
+//
+// Tuning note: the axis stops when it reaches AZIMUTH_TOLERANCE / ELEVATION_TOLERANCE, and the speed
+// it is still carrying at that point is sqrt(2 * deceleration * tolerance).  With the defaults below
+// that is sqrt(2*8*1.0) = 4.0 deg/sec for azimuth - the rotator is cut at that speed and coasts to a
+// halt, so any residual overshoot comes from mechanical inertia, not from the profile.  If the
+// rotator overshoots the target, lower the deceleration (arrive slower) or tighten the tolerance.
+#define AZ_MAX_ACCELERATION_DPSS 8.0      // azimuth acceleration limit (degrees/sec^2)
+#define AZ_MAX_DECELERATION_DPSS 8.0      // azimuth deceleration limit (degrees/sec^2)
+#define EL_MAX_ACCELERATION_DPSS 4.0      // elevation acceleration limit (degrees/sec^2)
+#define EL_MAX_DECELERATION_DPSS 4.0      // elevation deceleration limit (degrees/sec^2)
+
+// Full-speed slew rate of the rotator, in degrees/second, at PWM_SPEED_VOLTAGE_X4 (255).
+// Measure this on your hardware: time a large rotation at full speed and divide degrees by seconds.
+// Used to map the profile's velocity (deg/s) onto a PWM value.
+#define AZ_FULL_SPEED_DEG_PER_SEC 6.0     // azimuth degrees/sec at full PWM
+#define EL_FULL_SPEED_DEG_PER_SEC 3.0     // elevation degrees/sec at full PWM
+
+// Minimum PWM that still makes the rotator actually turn (stiction floor).  The profile never
+// commands a non-zero velocity below this, otherwise the motor would stall and buzz near the target.
+#define AZ_MOTION_PROFILE_MIN_PWM 48      // 0 - 255
+#define EL_MOTION_PROFILE_MIN_PWM 48      // 0 - 255
+
+// How often the profile recalculates velocity and PWM, in milliseconds.
+#define MOTION_PROFILE_UPDATE_MS 20
+
+// Velocity measurement filter: 0.0 = no filtering (noisy), 1.0 = frozen.  Pulse sensors deliver
+// discrete edges, so some smoothing is needed, especially at low speed.
+#define MOTION_PROFILE_VELOCITY_SMOOTHING 0.75
+
+// If no position change is seen for this long while commanding motion, assume velocity is zero.
+// Keeps the measured velocity from sticking at its last value when the rotator stops between pulses.
+#define MOTION_PROFILE_VELOCITY_TIMEOUT_MS 400
+
 // Variable frequency output settings and FEATURE_STEPPER_MOTOR settings
 #define AZ_VARIABLE_FREQ_OUTPUT_LOW   31    // Frequency in hertz of minimum speed (rotate_cw_freq, rotate_ccw_freq minimum value: 31 !)
 #define AZ_VARIABLE_FREQ_OUTPUT_HIGH 1000   // Frequency in hertz of maximum speed (FEATURE_STEPPER_MOTOR maximum value 2000 unless you change OPTION_STEPPER_MOTOR_MAX_X_KHZ in features file)

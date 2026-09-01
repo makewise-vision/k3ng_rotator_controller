@@ -157,3 +157,13 @@
 #if defined(FEATURE_MASTER_SEND_EL_ROTATION_COMMANDS_TO_REMOTE) && !defined(FEATURE_MASTER_WITH_SERIAL_SLAVE) && !defined(FEATURE_MASTER_WITH_ETHERNET_SLAVE)
   #error FEATURE_MASTER_SEND_EL_ROTATION_COMMANDS_TO_REMOTE can only be used with FEATURE_MASTER_WITH_SERIAL_SLAVE or FEATURE_MASTER_WITH_ETHERNET_SLAVE
 #endif
+
+// FEATURE_MOTION_PROFILE needs a variable-speed output to command velocity with; on/off direction
+// relays alone can only ever run at full speed, so there is nothing for the profile to drive.
+#if defined(FEATURE_MOTION_PROFILE) && !defined(FEATURE_ELEVATION_CONTROL)
+  #define MOTION_PROFILE_AZ_ONLY
+#endif
+
+#if defined(FEATURE_MOTION_PROFILE) && defined(FEATURE_STEPPER_MOTOR)
+  #error "FEATURE_MOTION_PROFILE and FEATURE_STEPPER_MOTOR are mutually exclusive - stepper motion is already rate controlled"
+#endif
