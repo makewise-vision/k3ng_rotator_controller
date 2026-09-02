@@ -1966,6 +1966,12 @@ void loop() {
     el_check_rotation_stall();
   #endif
 
+  // After both stall detectors, so a stall raised this pass aborts the run immediately rather than
+  // on the next one.
+  #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+    service_limit_calibration_run();
+  #endif
+
   #ifdef OPTION_MORE_SERIAL_CHECKS
     check_serial();
   #endif
@@ -7972,6 +7978,9 @@ void az_check_rotation_stall(){
             control_port->println(F("AZ Rotation Stall Detected"));
           #endif  
           submit_request(AZ, REQUEST_KILL, 0, 78);
+          #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+            az_stall_just_detected = 1;   // consumed by service_limit_calibration_run()
+          #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
           digitalWriteEnhanced(az_rotation_stall_detected,HIGH);
           rotation_stall_pin_active = 1;
           last_check_time = 0;
@@ -8014,6 +8023,9 @@ void el_check_rotation_stall(){
             control_port->println(F("EL Rotation Stall Detected"));
           #endif            
           submit_request(EL, REQUEST_KILL, 0, 78);
+          #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+            el_stall_just_detected = 1;   // consumed by service_limit_calibration_run()
+          #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
           digitalWriteEnhanced(el_rotation_stall_detected,HIGH);
           rotation_stall_pin_active = 1;
           last_check_time = 0;
@@ -9548,6 +9560,9 @@ void print_help(byte port){
     print_to_port("X4 Horizontal Rotation High Speed\n",port);
     print_to_port("S Stop\n",port);
     print_to_port("O Offset Calibration\n",port);
+    #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+      print_to_port("O3 Run Limit Switch Calibration (S aborts)\n",port);
+    #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
     print_to_port("F Full Scale Calibration\n",port);
     #ifdef FEATURE_ELEVATION_CONTROL
       print_to_port("U Rotate Elevation Up\n",port);
@@ -13602,6 +13617,9 @@ void check_limit_sense(){
       if (!az_limit_tripped) {
         submit_request(AZ, REQUEST_KILL, 0, 9);
         az_limit_tripped = 1;
+        #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+          az_limit_just_tripped = 1;   // consumed by service_limit_calibration_run()
+        #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
         #if defined(FEATURE_LIMIT_SENSE_AZ_CALIBRATE) && defined(FEATURE_AZ_POSITION_PULSE_INPUT)
           az_position_pulse_input_azimuth = az_limit_calibration_angle;
           configuration.last_azimuth= az_limit_calibration_angle ;
@@ -13628,6 +13646,9 @@ void check_limit_sense(){
       if (!el_limit_tripped) {
         submit_request(EL, REQUEST_KILL, 0, 10);
         el_limit_tripped = 1;
+        #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+          el_limit_just_tripped = 1;   // consumed by service_limit_calibration_run()
+        #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
         #if defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE) && defined(FEATURE_EL_POSITION_PULSE_INPUT)      
             el_position_pulse_input_elevation = el_limit_calibration_angle;
             configuration.last_elevation= el_limit_calibration_angle ;
@@ -18629,6 +18650,22 @@ void process_yaesu_command(byte * yaesu_command_buffer, int yaesu_command_buffer
             }
           #endif // DEBUG_PROCESS_YAESU
 
+          #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+            if ((yaesu_command_buffer[1] == '3') && (yaesu_command_buffer_index > 1)) {     // did we get the O3 command?
+              clear_serial_buffer();
+
+              #if defined(OPTION_ALLOW_ROTATIONAL_AND_CONFIGURATION_CMDS_AT_BOOT_UP)
+                start_limit_calibration_run(source_port);
+              #else
+                if (millis() > ROTATIONAL_AND_CONFIGURATION_CMD_IGNORE_TIME_MS){
+                  start_limit_calibration_run(source_port);
+                }
+              #endif // OPTION_ALLOW_ROTATIONAL_AND_CONFIGURATION_CMDS_AT_BOOT_UP
+
+              return;
+            }
+          #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+
           #ifdef FEATURE_ELEVATION_CONTROL
             if ((yaesu_command_buffer[1] == '2') && (yaesu_command_buffer_index > 1)) {     // did we get the O2 command?       
               clear_serial_buffer();
@@ -19418,6 +19455,14 @@ byte ethernet_slave_link_send(char * string_to_send){
 //-------------------------------------------------------
 
 void stop_rotation(){
+
+  #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+    // An all-stop cancels an O3 calibration run; otherwise its state machine would just re-command
+    // motion on the next pass and the operator could not stop the rotator.
+    if (limit_calibration_state != LIMIT_CAL_IDLE){
+      limit_calibration_finish(LIMIT_CAL_ABORT_USER);
+    }
+  #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
 
   submit_request(AZ, REQUEST_STOP, 0, DBG_STOP_ROTATION);
   #ifdef FEATURE_ELEVATION_CONTROL
