@@ -7939,7 +7939,7 @@ void az_check_rotation_stall(){
   // check if rotation has stalled
 
   static unsigned long last_check_time = 0;
-  static int last_raw_azimuth = 0;
+  static float last_raw_azimuth = 0;
   static byte rotation_stall_pin_active = 0;
 
   if (az_state != IDLE){
@@ -7981,7 +7981,7 @@ void el_check_rotation_stall(){
   // check if rotation has stalled
 
   static unsigned long last_check_time = 0;
-  static int last_elevation = 0;
+  static float last_elevation = 0;
   static byte rotation_stall_pin_active = 0;
 
   if (el_state != IDLE){
@@ -11454,20 +11454,19 @@ void service_az_motion_profile(){
     return;
   }
 
-  if (!az_profile_active) {   // first pass of a new profiled move - seed from wherever we already are
+  if (!az_profile_active) {   // first pass of a new profiled move
     az_profile_active = 1;
     az_profile_last_update = milliseconds;
     az_profile_last_movement = milliseconds;
     az_profile_last_position = raw_azimuth;
-    // Seed the commanded velocity from the speed we are actually carrying, so a target change
-    // mid-rotation continues smoothly instead of restarting from a standstill.
+    // Start the ramp from a standstill.  We get here only when the axis was not already under
+    // profile control, which means it was stopped - a new target arriving mid-rotation keeps
+    // az_request_queue_state at IN_PROGRESS_TO_TARGET, so az_profile_active is never cleared and
+    // az_profile_velocity carries the current speed straight through.  Seeding from the commanded
+    // PWM instead would start at full speed (rotator() has already asserted normal_az_speed_voltage
+    // by this point) and the acceleration limit would never apply to the initial ramp-up.
+    az_profile_velocity = 0.0;
     az_measured_velocity = 0.0;
-    if (current_az_speed_voltage > 0) {
-      float assumed = ((float)current_az_speed_voltage / 255.0) * (float)AZ_FULL_SPEED_DEG_PER_SEC;
-      az_profile_velocity = (az_state == NORMAL_CCW || az_state == SLOW_START_CCW || az_state == SLOW_DOWN_CCW) ? -assumed : assumed;
-    } else {
-      az_profile_velocity = 0.0;
-    }
     return;
   }
 
@@ -11532,6 +11531,8 @@ void service_az_motion_profile(){
     debug.print(az_measured_velocity, 3);
     debug.print(" v_brake:");
     debug.print(braking_velocity, 3);
+    debug.print(" elapsed_ms:");
+    debug.print(elapsed_ms);
     debug.println("");
   #endif // DEBUG_MOTION_PROFILE
 
@@ -11578,18 +11579,13 @@ void service_el_motion_profile(){
     return;
   }
 
-  if (!el_profile_active) {
+  if (!el_profile_active) {   // first pass of a new profiled move - start from a standstill, see azimuth above
     el_profile_active = 1;
     el_profile_last_update = milliseconds;
     el_profile_last_movement = milliseconds;
     el_profile_last_position = elevation;
+    el_profile_velocity = 0.0;
     el_measured_velocity = 0.0;
-    if (current_el_speed_voltage > 0) {
-      float assumed = ((float)current_el_speed_voltage / 255.0) * (float)EL_FULL_SPEED_DEG_PER_SEC;
-      el_profile_velocity = (el_state == NORMAL_DOWN || el_state == SLOW_START_DOWN || el_state == SLOW_DOWN_DOWN) ? -assumed : assumed;
-    } else {
-      el_profile_velocity = 0.0;
-    }
     return;
   }
 
@@ -11644,6 +11640,10 @@ void service_el_motion_profile(){
     debug.print(el_profile_velocity, 3);
     debug.print(" v_meas:");
     debug.print(el_measured_velocity, 3);
+    debug.print(" v_brake:");
+    debug.print(braking_velocity, 3);
+    debug.print(" elapsed_ms:");
+    debug.print(elapsed_ms);
     debug.println("");
   #endif // DEBUG_MOTION_PROFILE
 
