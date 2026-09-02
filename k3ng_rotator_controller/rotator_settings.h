@@ -152,6 +152,18 @@ You can tweak these, but read the online documentation!
   #define el_limit_calibration_angle 0
 #endif //FEATURE_LIMIT_SENSE_EL_CALIBRATE
 
+#ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+  // Settings for the O3 limit-switch calibration run.  Phase 1 drives each axis to its
+  // *_limit_calibration_angle as a normal targeted move; if the switch has not tripped on arrival,
+  // phase 2 creeps toward it at LIMIT_CALIBRATION_CREEP_PWM until it does.  Jammed-motor protection
+  // comes from FEATURE_AZ/EL_ROTATION_STALL_DETECTION (tuned by STALL_CHECK_* above), which already
+  // watches any non-idle axis - the run just aborts when it fires.
+  #define LIMIT_CALIBRATION_CREEP_PWM 90            // 0-255 PWM used for the slow approach; keep just above the stiction floor
+  #define LIMIT_CALIBRATION_CREEP_MAX_DEGREES 15.0  // give up if the switch has not tripped within this much creep travel
+  #define LIMIT_CALIBRATION_PHASE_TIMEOUT_MS 120000 // hard ceiling on any single phase
+  #define LIMIT_CALIBRATION_SETTLE_MS 750           // let the axis coast to a stop between phases before sampling position
+#endif //FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+
 // Speed pot settings
 #define SPEED_POT_LOW 0
 #define SPEED_POT_HIGH MAX_ANALOG_READ

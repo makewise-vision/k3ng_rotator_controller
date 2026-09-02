@@ -1349,6 +1349,18 @@ unsigned int  current_az_speed_voltage = 0;
   unsigned long az_profile_last_movement = 0;   // millis() of the last observed position change
   byte az_profile_active = 0;                   // 1 while the profile is driving this axis
 #endif // FEATURE_MOTION_PROFILE
+
+#ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+  byte az_limit_just_tripped = 0;                     // set by check_limit_sense(), cleared once acted on
+  byte el_limit_just_tripped = 0;
+  byte az_stall_just_detected = 0;                    // set by az_check_rotation_stall(), cleared once acted on
+  byte el_stall_just_detected = 0;
+  byte limit_calibration_state = LIMIT_CAL_IDLE;      // LIMIT_CAL_* phase of the O3 run
+  byte limit_calibration_port = 0;                    // port that started the run, so progress goes back to it
+  unsigned long limit_calibration_phase_start = 0;    // millis() the current phase began
+  float limit_calibration_creep_start = 0.0;          // position the creep phase started from, to bound its travel
+#endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+
 double latitude = DEFAULT_LATITUDE;
 double longitude = DEFAULT_LONGITUDE;
 double altitude_m = DEFAULT_ALTITUDE_M;

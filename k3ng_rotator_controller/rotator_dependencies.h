@@ -167,3 +167,25 @@
 #if defined(FEATURE_MOTION_PROFILE) && defined(FEATURE_STEPPER_MOTOR)
   #error "FEATURE_MOTION_PROFILE and FEATURE_STEPPER_MOTOR are mutually exclusive - stepper motion is already rate controlled"
 #endif
+
+// The O3 calibration run drives the axes onto their limit switches and re-zeros the position from
+// the *_limit_calibration_angle constants, so it needs both the switches and at least one axis
+// whose reading the limit sense is allowed to overwrite.
+#if defined(FEATURE_LIMIT_SENSE_CALIBRATION_RUN) && !defined(FEATURE_LIMIT_SENSE)
+  #error "FEATURE_LIMIT_SENSE_CALIBRATION_RUN requires FEATURE_LIMIT_SENSE"
+#endif
+
+#if defined(FEATURE_LIMIT_SENSE_CALIBRATION_RUN) && !defined(FEATURE_LIMIT_SENSE_AZ_CALIBRATE) && !defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE)
+  #error "FEATURE_LIMIT_SENSE_CALIBRATION_RUN requires FEATURE_LIMIT_SENSE_AZ_CALIBRATE and/or FEATURE_LIMIT_SENSE_EL_CALIBRATE"
+#endif
+
+// The O3 run relies on the rotation stall detection to catch a jammed motor while it is driving an
+// axis onto its limit switch; without it a stalled rotator would be pushed against until the phase
+// timeout, with no abort and no serial warning.
+#if defined(FEATURE_LIMIT_SENSE_CALIBRATION_RUN) && !defined(FEATURE_AZ_ROTATION_STALL_DETECTION)
+  #error "FEATURE_LIMIT_SENSE_CALIBRATION_RUN requires FEATURE_AZ_ROTATION_STALL_DETECTION for jammed-motor protection"
+#endif
+
+#if defined(FEATURE_LIMIT_SENSE_CALIBRATION_RUN) && defined(FEATURE_ELEVATION_CONTROL) && defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE) && !defined(FEATURE_EL_ROTATION_STALL_DETECTION)
+  #error "FEATURE_LIMIT_SENSE_CALIBRATION_RUN with FEATURE_LIMIT_SENSE_EL_CALIBRATE requires FEATURE_EL_ROTATION_STALL_DETECTION for jammed-motor protection"
+#endif
