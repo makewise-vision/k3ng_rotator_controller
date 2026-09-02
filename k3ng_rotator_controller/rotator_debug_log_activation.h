@@ -7,15 +7,15 @@
 #define DEBUG_DUMP  // normally compile with this activated unless you're really trying to save memory
 // #define DEBUG_LOOP
 // #define DEBUG_PROCESSES
-// #define DEBUG_BUTTONS
+#define DEBUG_BUTTONS
 // #define DEBUG_SERIAL
 // #define DEBUG_SERVICE_REQUEST_QUEUE
 // #define DEBUG_EEPROM
 // #define DEBUG_AZ_SPEED_POT
 // #define DEBUG_AZ_PRESET_POT
 // #define DEBUG_PRESET_ENCODERS
-// #define DEBUG_AZ_MANUAL_ROTATE_LIMITS
-// #define DEBUG_EL_MANUAL_ROTATE_LIMITS
+#define DEBUG_AZ_MANUAL_ROTATE_LIMITS
+#define DEBUG_EL_MANUAL_ROTATE_LIMITS
 // #define DEBUG_BRAKE
 // #define DEBUG_OVERLAP
 // #define DEBUG_DISPLAY
@@ -39,6 +39,7 @@
 // #define DEBUG_HH12
 // #define DEBUG_PARK
 #define DEBUG_LIMIT_SENSE
+#define DEBUG_LIMIT_CALIBRATION_RUN
 // #define DEBUG_AZ_POSITION_INCREMENTAL_ENCODER
 // #define DEBUG_EL_POSITION_INCREMENTAL_ENCODER
 // #define DEBUG_MOON_TRACKING
@@ -60,8 +61,8 @@
 // #define DEBUG_A2_ENCODER
 // #define DEBUG_A2_ENCODER_LOOPBACK_TEST
 // #define DEBUG_QMC5883
-// #define DEBUG_ROTATION_STALL_DETECTION
-// #define DEBUG_MOTION_PROFILE   // trapezoidal velocity profile: distance, commanded and measured velocity
+#define DEBUG_ROTATION_STALL_DETECTION
+#define DEBUG_MOTION_PROFILE   // trapezoidal velocity profile: distance, commanded and measured velocity
 // #define DEBUG_NEXTION_DISPLAY
 // #define DEBUG_NEXTION_DISPLAY_SERIAL_SEND
 // #define DEBUG_NEXTION_DISPLAY_SERIAL_RECV
