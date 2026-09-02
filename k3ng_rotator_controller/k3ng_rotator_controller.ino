@@ -7994,7 +7994,7 @@ void el_check_rotation_stall(){
       }
     } else {
       if ((millis() - last_check_time) > STALL_CHECK_FREQUENCY_MS_EL){
-        if ((abs((elevation - last_elevation))) < STALL_CHECK_DEGREES_THRESHOLD_AZ){
+        if ((abs((elevation - last_elevation))) < STALL_CHECK_DEGREES_THRESHOLD_EL){
           #ifdef DEBUG_ROTATION_STALL_DETECTION
             debug.println("el_check_rotation_stall: REQUEST_KILL");
           #endif
