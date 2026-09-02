@@ -13677,6 +13677,369 @@ void check_limit_sense(){
 #endif // FEATURE_LIMIT_SENSE
 
 // --------------------------------------------------------------
+
+#ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+
+// Is the limit switch for this axis pressed right now?  The run has to test the level rather than
+// watch for check_limit_sense()'s edge: that flag is latched and only rises on a released->pressed
+// transition, so a run started with the rotator already sitting on its limit would never see it.
+byte limit_calibration_switch_active(byte axis){
+
+  if (axis == AZ){
+    if (!az_limit_sense_pin){
+      return 0;
+    }
+    return (digitalReadEnhanced(az_limit_sense_pin) == 0);
+  }
+
+  #if defined(FEATURE_ELEVATION_CONTROL)
+    if (!el_limit_sense_pin){
+      return 0;
+    }
+    return (digitalReadEnhanced(el_limit_sense_pin) == 0);
+  #else
+    return 0;
+  #endif // FEATURE_ELEVATION_CONTROL
+
+}
+
+// Write the calibration angle into the position for an axis already sitting on its limit switch.
+// check_limit_sense() does this itself when it sees the switch close, but it only fires on the edge,
+// so a run that starts on the limit (or one whose creep re-presses an already-latched switch) has to
+// apply the angle here.
+void limit_calibration_apply_angle(byte axis){
+
+  if (axis == AZ){
+    #if defined(FEATURE_LIMIT_SENSE_AZ_CALIBRATE) && defined(FEATURE_AZ_POSITION_PULSE_INPUT)
+      az_position_pulse_input_azimuth = az_limit_calibration_angle;
+      configuration.last_azimuth = az_limit_calibration_angle;
+      azimuth = az_limit_calibration_angle;
+      raw_azimuth = az_limit_calibration_angle;
+      configuration_dirty = 1;
+      #ifdef DEBUG_LIMIT_CALIBRATION_RUN
+        debug.print(F("limit_calibration_apply_angle: az set to "));
+        debug.println(azimuth);
+      #endif // DEBUG_LIMIT_CALIBRATION_RUN
+    #endif
+  } else {
+    #if defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE) && defined(FEATURE_EL_POSITION_PULSE_INPUT) && defined(FEATURE_ELEVATION_CONTROL)
+      el_position_pulse_input_elevation = el_limit_calibration_angle;
+      configuration.last_elevation = el_limit_calibration_angle;
+      elevation = el_limit_calibration_angle;
+      configuration_dirty = 1;
+      #ifdef DEBUG_LIMIT_CALIBRATION_RUN
+        debug.print(F("limit_calibration_apply_angle: el set to "));
+        debug.println(elevation);
+      #endif // DEBUG_LIMIT_CALIBRATION_RUN
+    #endif
+  }
+
+}
+
+// Report the outcome of a calibration run and drop back to idle.  Both axes are killed first so an
+// abort can never leave a motor driving into a limit.
+void limit_calibration_finish(byte outcome){
+
+  submit_request(AZ, REQUEST_KILL, 0, DBG_LIMIT_CALIBRATION_RUN);
+  #ifdef FEATURE_ELEVATION_CONTROL
+    submit_request(EL, REQUEST_KILL, 0, DBG_LIMIT_CALIBRATION_RUN);
+  #endif // FEATURE_ELEVATION_CONTROL
+
+  if (limit_calibration_port == CONTROL_PORT0){
+    switch(outcome){
+      case LIMIT_CAL_DONE:            control_port->println(F("O3: calibration complete")); break;
+      case LIMIT_CAL_ABORT_STALL:     control_port->println(F("O3: ABORTED - rotator not moving, check for a jammed motor")); break;
+      case LIMIT_CAL_ABORT_TIMEOUT:   control_port->println(F("O3: ABORTED - phase timed out")); break;
+      case LIMIT_CAL_ABORT_NO_LIMIT:  control_port->println(F("O3: ABORTED - limit switch not found within creep range")); break;
+      case LIMIT_CAL_ABORT_USER:      control_port->println(F("O3: ABORTED by operator")); break;
+    }
+  }
+
+  #ifdef DEBUG_LIMIT_CALIBRATION_RUN
+    debug.print(F("limit_calibration_finish: outcome "));
+    debug.println(outcome);
+  #endif // DEBUG_LIMIT_CALIBRATION_RUN
+
+  limit_calibration_state = LIMIT_CAL_IDLE;
+  az_limit_just_tripped = 0;
+  el_limit_just_tripped = 0;
+  az_stall_just_detected = 0;
+  el_stall_just_detected = 0;
+
+}
+
+// Enter a phase: stamp its start time so the phase timeout is measured from here.
+void limit_calibration_enter_phase(byte new_state, float current_position){
+
+  limit_calibration_state = new_state;
+  limit_calibration_phase_start = millis();
+
+  #ifdef DEBUG_LIMIT_CALIBRATION_RUN
+    debug.print(F("limit_calibration_enter_phase: state "));
+    debug.print(new_state);
+    debug.print(F(" at "));
+    debug.println(current_position);
+  #endif // DEBUG_LIMIT_CALIBRATION_RUN
+
+}
+
+/*
+  service_limit_calibration_run()
+
+  Drives each axis onto its limit switch so the position readout can be re-zeroed from
+  az_limit_calibration_angle / el_limit_calibration_angle.  Started by the O3 serial command,
+  serviced from loop() like every other state machine here - it never blocks.
+
+  Per axis:
+    *_SEEK_TARGET  normal targeted move to the calibration angle (full motion profile, so it gets
+                   there quickly and decelerates properly).  If the switch trips on the way, we are
+                   already done - check_limit_sense() has killed the axis and written the angle.
+    *_SETTLE       let the axis coast to a stop so the creep starts from a real position reading.
+    *_CREEP        the switch did not trip, so we are short of it: inch toward it at
+                   LIMIT_CALIBRATION_CREEP_PWM until check_limit_sense() fires, bounded by travel,
+                   time, and the stall watchdog above.
+
+  Aborts on a stalled motor, a phase timeout, or creeping past LIMIT_CALIBRATION_CREEP_MAX_DEGREES
+  without finding the switch.  Any of those stops both axes.
+*/
+void service_limit_calibration_run(){
+
+  if (limit_calibration_state == LIMIT_CAL_IDLE){
+    return;
+  }
+
+  // The existing rotation stall detection is our jammed-motor protection: it already watches every
+  // non-idle axis, which covers both the seek and the creep phases, and has killed the axis by the
+  // time we see this flag.  Do not let the run carry on commanding motion into a stalled rotator.
+  #if defined(FEATURE_AZ_ROTATION_STALL_DETECTION)
+    if (az_stall_just_detected){
+      az_stall_just_detected = 0;
+      limit_calibration_finish(LIMIT_CAL_ABORT_STALL);
+      return;
+    }
+  #endif // FEATURE_AZ_ROTATION_STALL_DETECTION
+
+  #if defined(FEATURE_EL_ROTATION_STALL_DETECTION) && defined(FEATURE_ELEVATION_CONTROL)
+    if (el_stall_just_detected){
+      el_stall_just_detected = 0;
+      limit_calibration_finish(LIMIT_CAL_ABORT_STALL);
+      return;
+    }
+  #endif // FEATURE_EL_ROTATION_STALL_DETECTION && FEATURE_ELEVATION_CONTROL
+
+  if ((limit_calibration_state != LIMIT_CAL_AZ_START) && (limit_calibration_state != LIMIT_CAL_EL_START)){
+    if ((millis() - limit_calibration_phase_start) > LIMIT_CALIBRATION_PHASE_TIMEOUT_MS){
+      limit_calibration_finish(LIMIT_CAL_ABORT_TIMEOUT);
+      return;
+    }
+  }
+
+  switch(limit_calibration_state){
+
+    #ifdef FEATURE_LIMIT_SENSE_AZ_CALIBRATE
+    case LIMIT_CAL_AZ_START:
+      if (!az_limit_sense_pin){         // no switch wired - nothing to calibrate against
+        limit_calibration_state = LIMIT_CAL_EL_START;
+        break;
+      }
+      az_limit_just_tripped = 0;
+      // Already sitting on the limit: nothing to drive, just adopt the calibration angle.  Trying to
+      // seek from here would only fight check_limit_sense(), which kills the axis every time it is
+      // commanded to move while the switch is closed.
+      if (limit_calibration_switch_active(AZ)){
+        limit_calibration_apply_angle(AZ);
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: azimuth already at limit"));
+        }
+        limit_calibration_state = LIMIT_CAL_EL_START;
+        break;
+      }
+      if (limit_calibration_port == CONTROL_PORT0){
+        control_port->println(F("O3: azimuth seeking limit..."));
+      }
+      submit_request(AZ, REQUEST_AZIMUTH, az_limit_calibration_angle, DBG_LIMIT_CALIBRATION_RUN);
+      limit_calibration_enter_phase(LIMIT_CAL_AZ_SEEK_TARGET, raw_azimuth);
+      break;
+
+    case LIMIT_CAL_AZ_SEEK_TARGET:
+      if (az_limit_just_tripped || limit_calibration_switch_active(AZ)){   // switch found on the way
+        az_limit_just_tripped = 0;
+        limit_calibration_apply_angle(AZ);
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: azimuth limit reached"));
+        }
+        limit_calibration_state = LIMIT_CAL_EL_START;
+        break;
+      }
+      if (az_state == IDLE){            // arrived (or was stopped) without tripping - go creep for it
+        limit_calibration_enter_phase(LIMIT_CAL_AZ_SETTLE, raw_azimuth);
+      }
+      break;
+
+    case LIMIT_CAL_AZ_SETTLE:
+      if ((millis() - limit_calibration_phase_start) > LIMIT_CALIBRATION_SETTLE_MS){
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: azimuth creeping to limit..."));
+        }
+        limit_calibration_creep_start = raw_azimuth;
+        // Creep in the direction the calibration angle lies from us; if we are sitting on it, keep
+        // going the way we were already heading (CCW by default, the usual home direction).
+        if (raw_azimuth > (az_limit_calibration_angle + AZIMUTH_TOLERANCE)){
+          submit_request(AZ, REQUEST_CCW, 0, DBG_LIMIT_CALIBRATION_RUN);
+        } else {
+          submit_request(AZ, REQUEST_CW, 0, DBG_LIMIT_CALIBRATION_RUN);
+        }
+        limit_calibration_enter_phase(LIMIT_CAL_AZ_CREEP, raw_azimuth);
+      }
+      break;
+
+    case LIMIT_CAL_AZ_CREEP:
+      if (az_limit_just_tripped || limit_calibration_switch_active(AZ)){
+        az_limit_just_tripped = 0;
+        limit_calibration_apply_angle(AZ);
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: azimuth limit reached"));
+        }
+        limit_calibration_state = LIMIT_CAL_EL_START;
+        break;
+      }
+      // Hold the creep speed down: rotator() re-asserts normal_az_speed_voltage whenever it starts
+      // an axis, so pin the slow PWM here every pass rather than once at entry.
+      if (az_state != IDLE){
+        update_az_variable_outputs(LIMIT_CALIBRATION_CREEP_PWM);
+      } else {
+        // The axis stopped on its own without the switch tripping - manual rotate limit, timeout, or
+        // an operator stop.  Either way the switch is not where we expected it.
+        limit_calibration_finish(LIMIT_CAL_ABORT_NO_LIMIT);
+        break;
+      }
+      if (fabs(raw_azimuth - limit_calibration_creep_start) > LIMIT_CALIBRATION_CREEP_MAX_DEGREES){
+        limit_calibration_finish(LIMIT_CAL_ABORT_NO_LIMIT);
+        break;
+      }
+      break;
+    #endif // FEATURE_LIMIT_SENSE_AZ_CALIBRATE
+
+    #if defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE) && defined(FEATURE_ELEVATION_CONTROL)
+    case LIMIT_CAL_EL_START:
+      if (!el_limit_sense_pin){
+        limit_calibration_finish(LIMIT_CAL_DONE);
+        break;
+      }
+      el_limit_just_tripped = 0;
+      if (limit_calibration_switch_active(EL)){   // already on the limit - see the azimuth case above
+        limit_calibration_apply_angle(EL);
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: elevation already at limit"));
+        }
+        limit_calibration_finish(LIMIT_CAL_DONE);
+        break;
+      }
+      if (limit_calibration_port == CONTROL_PORT0){
+        control_port->println(F("O3: elevation seeking limit..."));
+      }
+      submit_request(EL, REQUEST_ELEVATION, el_limit_calibration_angle, DBG_LIMIT_CALIBRATION_RUN);
+      limit_calibration_enter_phase(LIMIT_CAL_EL_SEEK_TARGET, elevation);
+      break;
+
+    case LIMIT_CAL_EL_SEEK_TARGET:
+      if (el_limit_just_tripped || limit_calibration_switch_active(EL)){
+        el_limit_just_tripped = 0;
+        limit_calibration_apply_angle(EL);
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: elevation limit reached"));
+        }
+        limit_calibration_finish(LIMIT_CAL_DONE);
+        break;
+      }
+      if (el_state == IDLE){
+        limit_calibration_enter_phase(LIMIT_CAL_EL_SETTLE, elevation);
+      }
+      break;
+
+    case LIMIT_CAL_EL_SETTLE:
+      if ((millis() - limit_calibration_phase_start) > LIMIT_CALIBRATION_SETTLE_MS){
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: elevation creeping to limit..."));
+        }
+        limit_calibration_creep_start = elevation;
+        if (elevation > (el_limit_calibration_angle + ELEVATION_TOLERANCE)){
+          submit_request(EL, REQUEST_DOWN, 0, DBG_LIMIT_CALIBRATION_RUN);
+        } else {
+          submit_request(EL, REQUEST_UP, 0, DBG_LIMIT_CALIBRATION_RUN);
+        }
+        limit_calibration_enter_phase(LIMIT_CAL_EL_CREEP, elevation);
+      }
+      break;
+
+    case LIMIT_CAL_EL_CREEP:
+      if (el_limit_just_tripped || limit_calibration_switch_active(EL)){
+        el_limit_just_tripped = 0;
+        limit_calibration_apply_angle(EL);
+        if (limit_calibration_port == CONTROL_PORT0){
+          control_port->println(F("O3: elevation limit reached"));
+        }
+        limit_calibration_finish(LIMIT_CAL_DONE);
+        break;
+      }
+      if (el_state != IDLE){
+        update_el_variable_outputs(LIMIT_CALIBRATION_CREEP_PWM);
+      } else {
+        limit_calibration_finish(LIMIT_CAL_ABORT_NO_LIMIT);
+        break;
+      }
+      if (fabs(elevation - limit_calibration_creep_start) > LIMIT_CALIBRATION_CREEP_MAX_DEGREES){
+        limit_calibration_finish(LIMIT_CAL_ABORT_NO_LIMIT);
+        break;
+      }
+      break;
+    #else
+    case LIMIT_CAL_EL_START:            // no elevation axis to calibrate - the AZ pass was the whole run
+      limit_calibration_finish(LIMIT_CAL_DONE);
+      break;
+    #endif // FEATURE_LIMIT_SENSE_EL_CALIBRATE && FEATURE_ELEVATION_CONTROL
+
+    default:
+      limit_calibration_finish(LIMIT_CAL_DONE);
+      break;
+
+  }
+
+} /* service_limit_calibration_run */
+
+// Kick off a calibration run.  Refuses to start a second one on top of a run already in progress.
+void start_limit_calibration_run(byte source_port){
+
+  limit_calibration_port = source_port;
+
+  if (limit_calibration_state != LIMIT_CAL_IDLE){
+    if (source_port == CONTROL_PORT0){
+      control_port->println(F("O3: calibration already running - send S to stop"));
+    }
+    return;
+  }
+
+  if (source_port == CONTROL_PORT0){
+    control_port->println(F("O3: limit calibration starting - send S to abort"));
+  }
+
+  // Start from a known standstill so the seek phases begin cleanly.
+  submit_request(AZ, REQUEST_KILL, 0, DBG_LIMIT_CALIBRATION_RUN);
+  #ifdef FEATURE_ELEVATION_CONTROL
+    submit_request(EL, REQUEST_KILL, 0, DBG_LIMIT_CALIBRATION_RUN);
+  #endif // FEATURE_ELEVATION_CONTROL
+
+  #ifdef FEATURE_LIMIT_SENSE_AZ_CALIBRATE
+    limit_calibration_enter_phase(LIMIT_CAL_AZ_START, raw_azimuth);
+  #else
+    limit_calibration_enter_phase(LIMIT_CAL_EL_START, 0);
+  #endif // FEATURE_LIMIT_SENSE_AZ_CALIBRATE
+
+} /* start_limit_calibration_run */
+
+#endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
+
+// --------------------------------------------------------------
 #ifdef FEATURE_AZ_POSITION_INCREMENTAL_ENCODER
 void az_position_incremental_encoder_interrupt_handler(){
 
