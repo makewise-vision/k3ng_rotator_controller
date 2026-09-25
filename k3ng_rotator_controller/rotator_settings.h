@@ -105,9 +105,9 @@ You can tweak these, but read the online documentation!
 // halt, so any residual overshoot comes from mechanical inertia, not from the profile.  If the
 // rotator overshoots the target, lower the deceleration (arrive slower) or tighten the tolerance.
 #define AZ_MAX_ACCELERATION_DPSS 30.0      // azimuth acceleration limit (degrees/sec^2)
-#define AZ_MAX_DECELERATION_DPSS 30.0      // azimuth deceleration limit (degrees/sec^2)
+#define AZ_MAX_DECELERATION_DPSS 20.0      // azimuth deceleration limit (degrees/sec^2)
 #define EL_MAX_ACCELERATION_DPSS 8.0      // elevation acceleration limit (degrees/sec^2)
-#define EL_MAX_DECELERATION_DPSS 8.0      // elevation deceleration limit (degrees/sec^2)
+#define EL_MAX_DECELERATION_DPSS 6.0      // elevation deceleration limit (degrees/sec^2)
 
 // Full-speed slew rate of the rotator, in degrees/second, at PWM_SPEED_VOLTAGE_X4 (255).
 // Measure this on your hardware: time a large rotation at full speed and divide degrees by seconds.

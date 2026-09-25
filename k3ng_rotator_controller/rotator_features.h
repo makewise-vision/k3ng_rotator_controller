@@ -131,7 +131,7 @@
 #define FEATURE_LIMIT_SENSE_EL_CALIBRATE
 #define FEATURE_LIMIT_SENSE_CALIBRATION_RUN   // O3 command: drive both axes onto their limit switches to re-zero them
 #define FEATURE_TIMED_BUFFER           // Support for Yaesu timed buffer commands
- #define OPTION_SERIAL_HELP_TEXT        // Yaesu help command prints help
+#define OPTION_SERIAL_HELP_TEXT        // Yaesu help command prints help
 // #define FEATURE_PARK
 // #define FEATURE_AUTOPARK               // Requires FEATURE_PARK
 #define OPTION_AZ_MANUAL_ROTATE_LIMITS    // this option will automatically stop the L and R commands when hitting a CCW or CW limit (settings are AZ_MANUAL_ROTATE_CCW_LIMIT, AZ_MANUAL_ROTATE_CW_LIMIT) 
