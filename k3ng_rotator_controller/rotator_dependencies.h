@@ -189,3 +189,9 @@
 #if defined(FEATURE_LIMIT_SENSE_CALIBRATION_RUN) && defined(FEATURE_ELEVATION_CONTROL) && defined(FEATURE_LIMIT_SENSE_EL_CALIBRATE) && !defined(FEATURE_EL_ROTATION_STALL_DETECTION)
   #error "FEATURE_LIMIT_SENSE_CALIBRATION_RUN with FEATURE_LIMIT_SENSE_EL_CALIBRATE requires FEATURE_EL_ROTATION_STALL_DETECTION for jammed-motor protection"
 #endif
+
+// The JAMMER command is dispatched from the Yaesu command parser, so that emulation has to be
+// active for the J command to ever reach trigger_jammer().
+#if defined(FEATURE_JAMMER_COMMAND) && !defined(FEATURE_YAESU_EMULATION)
+  #error "FEATURE_JAMMER_COMMAND requires FEATURE_YAESU_EMULATION (the J command is parsed there)"
+#endif

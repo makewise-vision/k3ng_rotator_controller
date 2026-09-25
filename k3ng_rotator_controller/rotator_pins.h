@@ -32,6 +32,8 @@
 #define rotation_indication_pin 0
 #define blink_led 0
 #define az_stepper_motor_pulse 0
+#define jammer_pin A1            // output - JAMMER command (J) drives this active for JAMMER_ACTIVE_TIME_MS; 0 = disabled
+
 #define az_rotation_stall_detected 0
 
 

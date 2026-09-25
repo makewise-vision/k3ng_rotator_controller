@@ -1350,6 +1350,11 @@ unsigned int  current_az_speed_voltage = 0;
   byte az_profile_active = 0;                   // 1 while the profile is driving this axis
 #endif // FEATURE_MOTION_PROFILE
 
+#ifdef FEATURE_JAMMER_COMMAND
+  byte jammer_active = 0;                 // 1 while jammer_pin is being held active
+  unsigned long jammer_expiry_time = 0;   // millis() the pin goes inactive; a new J pushes this out
+#endif // FEATURE_JAMMER_COMMAND
+
 #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
   byte az_limit_just_tripped = 0;                     // set by check_limit_sense(), cleared once acted on
   byte el_limit_just_tripped = 0;
@@ -1970,6 +1975,10 @@ void loop() {
   // on the next one.
   #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
     service_limit_calibration_run();
+  #endif
+
+  #ifdef FEATURE_JAMMER_COMMAND
+    service_jammer();
   #endif
 
   #ifdef OPTION_MORE_SERIAL_CHECKS
@@ -9559,6 +9568,9 @@ void print_help(byte port){
     print_to_port("X3 Horizontal Rotation Middle 2 Speed\n",port);
     print_to_port("X4 Horizontal Rotation High Speed\n",port);
     print_to_port("S Stop\n",port);
+    #ifdef FEATURE_JAMMER_COMMAND
+      print_to_port("J JAMMER (pulse jammer pin, retriggerable)\n",port);
+    #endif // FEATURE_JAMMER_COMMAND
     print_to_port("O Offset Calibration\n",port);
     #ifdef FEATURE_LIMIT_SENSE_CALIBRATION_RUN
       print_to_port("O3 Run Limit Switch Calibration (S aborts)\n",port);
@@ -10946,6 +10958,13 @@ void initialize_pins(){
   }
 
   #ifdef FEATURE_LIMIT_SENSE
+  #ifdef FEATURE_JAMMER_COMMAND
+    if (jammer_pin) {
+      pinModeEnhanced(jammer_pin, OUTPUT);
+      digitalWriteEnhanced(jammer_pin, JAMMER_PIN_INACTIVE_STATE);
+    }
+  #endif // FEATURE_JAMMER_COMMAND
+
   if (az_limit_sense_pin) {
     pinModeEnhanced(az_limit_sense_pin, INPUT);
     digitalWriteEnhanced(az_limit_sense_pin, HIGH);
@@ -13675,6 +13694,62 @@ void check_limit_sense(){
 
 } /* check_limit_sense */
 #endif // FEATURE_LIMIT_SENSE
+
+// --------------------------------------------------------------
+
+#ifdef FEATURE_JAMMER_COMMAND
+
+/*
+  JAMMER command (J)
+
+  Holds jammer_pin active for JAMMER_ACTIVE_TIME_MS.  The window is *retriggerable*: a J arriving
+  while the pin is already active restarts the full window from that moment, so the pin stays up for
+  another JAMMER_ACTIVE_TIME_MS rather than the remainder of the original window.  Holding the pin is
+  done by expiry timestamp rather than a countdown, which keeps a retrigger to a single assignment
+  and avoids drift across loop passes.
+
+  service_jammer() drops the pin when the window expires; like everything else in loop() it never
+  blocks, so rotation and safety checks keep running while the pin is held.
+*/
+void trigger_jammer(){
+
+  if (!jammer_pin){                       // no pin assigned - nothing to drive
+    return;
+  }
+
+  if (!jammer_active){
+    digitalWriteEnhanced(jammer_pin, JAMMER_PIN_ACTIVE_STATE);
+    jammer_active = 1;
+  }
+
+  // Retrigger: always push the expiry out to a full window from now.
+  jammer_expiry_time = millis() + JAMMER_ACTIVE_TIME_MS;
+
+  #ifdef DEBUG_JAMMER_COMMAND
+    debug.print(F("trigger_jammer: active until "));
+    debug.println((int)jammer_expiry_time);
+  #endif // DEBUG_JAMMER_COMMAND
+
+} /* trigger_jammer */
+
+void service_jammer(){
+
+  if (!jammer_active){
+    return;
+  }
+
+  // Subtraction rather than a direct compare, so the window survives the millis() rollover.
+  if ((long)(millis() - jammer_expiry_time) >= 0){
+    digitalWriteEnhanced(jammer_pin, JAMMER_PIN_INACTIVE_STATE);
+    jammer_active = 0;
+    #ifdef DEBUG_JAMMER_COMMAND
+      debug.println(F("service_jammer: jammer_pin released"));
+    #endif // DEBUG_JAMMER_COMMAND
+  }
+
+} /* service_jammer */
+
+#endif // FEATURE_JAMMER_COMMAND
 
 // --------------------------------------------------------------
 
@@ -18975,6 +19050,32 @@ void process_yaesu_command(byte * yaesu_command_buffer, int yaesu_command_buffer
 
           break;
         #endif // FEATURE_AZ_POSITION_POTENTIOMETER
+
+      #ifdef FEATURE_JAMMER_COMMAND
+        case 'J':  // J - JAMMER: hold jammer_pin active for JAMMER_ACTIVE_TIME_MS (retriggerable)
+          #ifdef DEBUG_PROCESS_YAESU
+            if (debug_mode) {
+              debug.print("yaesu_serial_command: J\n");
+            }
+          #endif // DEBUG_PROCESS_YAESU
+
+          if (!jammer_pin){
+            strcpy_P(return_string,(const char*) F("JAMMER pin not assigned"));
+            break;
+          }
+
+          #if defined(OPTION_ALLOW_ROTATIONAL_AND_CONFIGURATION_CMDS_AT_BOOT_UP)
+            trigger_jammer();
+            strcpy_P(return_string,(const char*) F("JAMMER"));
+          #else
+            if (millis() > ROTATIONAL_AND_CONFIGURATION_CMD_IGNORE_TIME_MS){
+              trigger_jammer();
+              strcpy_P(return_string,(const char*) F("JAMMER"));
+            }
+          #endif // OPTION_ALLOW_ROTATIONAL_AND_CONFIGURATION_CMDS_AT_BOOT_UP
+
+          break;
+      #endif // FEATURE_JAMMER_COMMAND
 
       case 'H': print_help(source_port); break;                     // H - print help - depricated
 

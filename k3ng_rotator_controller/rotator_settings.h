@@ -399,6 +399,14 @@ You can tweak these, but read the online documentation!
 
 //#define SET_I2C_BUS_SPEED 800000L // Can set up to 800 kHz, depending on devices.  800000L = 800 khz, 400000L = 400 khz.  Default is 100 khz
 
+#ifdef FEATURE_JAMMER_COMMAND
+  // How long the J (JAMMER) command holds jammer_pin active.  A J arriving while the pin is already
+  // active restarts this window from that moment rather than extending or ignoring it.
+  #define JAMMER_ACTIVE_TIME_MS 2000
+  #define JAMMER_PIN_ACTIVE_STATE HIGH
+  #define JAMMER_PIN_INACTIVE_STATE LOW
+#endif //FEATURE_JAMMER_COMMAND
+
 #define ROTATIONAL_AND_CONFIGURATION_CMD_IGNORE_TIME_MS 5000 // if OPTION_ALLOW_ROTATIONAL_AND_CONFIGURATION_CMDS_AT_BOOT_UP is enabled, ignore configuration and rotational command for this many mS after boot up
 
 /* Deprecated in version 2020.06.20.01
