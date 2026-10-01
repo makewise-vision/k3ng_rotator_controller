@@ -109,6 +109,12 @@
 #define ENCODER_EL_PENDING    2
 #define ENCODER_AZ_EL_PENDING 3
 
+// Motion profile mode for manual rotation (FEATURE_MOTION_PROFILE).  Targeted moves derive their
+// speed from the distance left; these two have no target, so they command a fixed speed instead.
+#define MOTION_PROFILE_MANUAL_OFF 0    // not a manual move - speed comes from the distance to target
+#define MOTION_PROFILE_MANUAL_RUN 1    // manual L/R/U/D: accelerate to top speed and hold it
+#define MOTION_PROFILE_MANUAL_STOP 2   // soft stop (A/E): decelerate to zero, then idle the axis
+
 // Phases of the O3 limit-switch calibration run (FEATURE_LIMIT_SENSE_CALIBRATION_RUN)
 #define LIMIT_CAL_IDLE 0
 #define LIMIT_CAL_AZ_START 1

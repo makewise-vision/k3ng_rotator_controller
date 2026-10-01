@@ -1348,6 +1348,12 @@ unsigned int  current_az_speed_voltage = 0;
   unsigned long az_profile_last_update = 0;     // millis() of the last profile update
   unsigned long az_profile_last_movement = 0;   // millis() of the last observed position change
   byte az_profile_active = 0;                   // 1 while the profile is driving this axis
+  byte az_profile_manual = 0;                   // MOTION_PROFILE_MANUAL_*: manual L/R rotation or a soft stop
+  byte az_profile_direction = 0;                // CW/CCW wanted by a manual move; survives braking through zero
+  #ifdef FEATURE_ELEVATION_CONTROL
+    byte el_profile_manual = 0;                 // MOTION_PROFILE_MANUAL_*: manual U/D rotation or a soft stop
+    byte el_profile_direction = 0;              // UP/DOWN wanted by a manual move; survives braking through zero
+  #endif // FEATURE_ELEVATION_CONTROL
 #endif // FEATURE_MOTION_PROFILE
 
 #ifdef FEATURE_JAMMER_COMMAND
@@ -11486,17 +11492,25 @@ void service_az_motion_profile(){
 
   unsigned long milliseconds = millis();
 
-  // Only run the profile while a target-seeking rotation is in progress.  Manual CW/CCW rotation and
-  // timed-interval moves keep the original behaviour, since they have no target to brake toward.
-  if ((az_request_queue_state != IN_PROGRESS_TO_TARGET) ||
-      ((az_state != NORMAL_CW) && (az_state != NORMAL_CCW) &&
-       (az_state != SLOW_START_CW) && (az_state != SLOW_START_CCW) &&
-       (az_state != SLOW_DOWN_CW) && (az_state != SLOW_DOWN_CCW))) {
+  // The profile drives two kinds of move.  A targeted move (IN_PROGRESS_TO_TARGET) derives its speed
+  // from the distance left to brake in.  A manual move (az_profile_manual) has no target: L/R hold
+  // top speed, and a soft stop (A) ramps down to zero - both still bounded by the same accel/decel
+  // limits, so manual rotation is no longer governed by the old timed PWM steps.
+  byte az_in_rotation_state = ((az_state == NORMAL_CW) || (az_state == NORMAL_CCW) ||
+                               (az_state == SLOW_START_CW) || (az_state == SLOW_START_CCW) ||
+                               (az_state == SLOW_DOWN_CW) || (az_state == SLOW_DOWN_CCW));
+
+  byte az_profile_should_run = az_in_rotation_state &&
+                               ((az_request_queue_state == IN_PROGRESS_TO_TARGET) ||
+                                (az_profile_manual != MOTION_PROFILE_MANUAL_OFF));
+
+  if (!az_profile_should_run) {
     if (az_profile_active) {   // we just left profile control - forget the ramp state
       az_profile_active = 0;
       az_profile_velocity = 0.0;
       az_measured_velocity = 0.0;
     }
+    az_profile_manual = MOTION_PROFILE_MANUAL_OFF;
     return;
   }
 
@@ -11505,12 +11519,35 @@ void service_az_motion_profile(){
     az_profile_last_update = milliseconds;
     az_profile_last_movement = milliseconds;
     az_profile_last_position = raw_azimuth;
-    // Start the ramp from a standstill.  We get here only when the axis was not already under
-    // profile control, which means it was stopped - a new target arriving mid-rotation keeps
-    // az_request_queue_state at IN_PROGRESS_TO_TARGET, so az_profile_active is never cleared and
-    // az_profile_velocity carries the current speed straight through.  Seeding from the commanded
-    // PWM instead would start at full speed (rotator() has already asserted normal_az_speed_voltage
-    // by this point) and the acceleration limit would never apply to the initial ramp-up.
+
+    // Seed the ramp.  A targeted move always starts from a standstill: a new target arriving
+    // mid-rotation keeps az_request_queue_state at IN_PROGRESS_TO_TARGET, so az_profile_active is
+    // never cleared and the velocity carries straight through.  Seeding from the commanded PWM
+    // instead would start at full speed (rotator() has already asserted normal_az_speed_voltage by
+    // this point) and the acceleration limit would never apply to the initial ramp-up.
+    //
+    // A manual move is different: L/R leave the queue at NONE, so the profile drops out of control
+    // whenever az_state is briefly not a rotation state (INITIALIZE_NORMAL_CW between the request
+    // and the rotation proper).  A soft stop asked for after that would re-enter here with the axis
+    // still turning at speed - seeding zero would make the completion test fire immediately and cut
+    // the motor with no deceleration at all.  So when the axis is already moving, start the ramp
+    // from the speed we are actually carrying and let it brake down from there.
+    if ((az_profile_manual != MOTION_PROFILE_MANUAL_OFF) && (current_az_state() != NOT_DOING_ANYTHING)) {
+      float seed_speed = fabs(az_measured_velocity);
+      if (seed_speed < MOTION_PROFILE_STOPPED_DPS) {
+        // No usable measurement yet (pulse sensors need a couple of edges).  Assume the axis is at
+        // the speed the PWM was commanding, which is the worst case for braking distance.
+        seed_speed = ((float)current_az_speed_voltage / 255.0) * (float)AZ_FULL_SPEED_DEG_PER_SEC;
+      }
+      az_profile_velocity = (current_az_state() == ROTATING_CCW) ? -seed_speed : seed_speed;
+      #ifdef DEBUG_MOTION_PROFILE
+        debug.print("service_az_motion_profile: manual seed v:");
+        debug.print(az_profile_velocity, 3);
+        debug.println("");
+      #endif // DEBUG_MOTION_PROFILE
+      return;
+    }
+
     az_profile_velocity = 0.0;
     az_measured_velocity = 0.0;
     return;
@@ -11538,20 +11575,7 @@ void service_az_motion_profile(){
     }
   }
 
-  // 2. Velocity we are allowed to carry, given the distance left to brake in ---------------------
-  float distance_to_target = target_raw_azimuth - raw_azimuth;   // signed: + = CW, - = CCW
-  float distance_magnitude = fabs(distance_to_target);
-
-  // Inside the tolerance band the move is done: command zero and let service_rotation()'s target
-  // check stop the axis.  Without this the profile would keep commanding motion across the target
-  // and hunt around it in a limit cycle.
-  if (distance_magnitude <= AZIMUTH_TOLERANCE) {
-    az_profile_velocity = 0.0;
-    return;
-  }
-
-  // v = sqrt(2*a*d) is the fastest we can be going and still stop exactly on target.
-  float braking_velocity = sqrt(2.0 * (float)AZ_MAX_DECELERATION_DPSS * distance_magnitude);
+  // 2. Work out the velocity we want to be carrying ----------------------------------------------
 
   // Full speed for this axis, from the current speed setting (Yaesu X commands / speed pot).
   float top_speed = ((float)normal_az_speed_voltage / 255.0) * (float)AZ_FULL_SPEED_DEG_PER_SEC;
@@ -11559,8 +11583,46 @@ void service_az_motion_profile(){
     top_speed = (float)AZ_FULL_SPEED_DEG_PER_SEC;
   }
 
-  float desired_speed = (braking_velocity < top_speed) ? braking_velocity : top_speed;
-  float desired_velocity = (distance_to_target >= 0.0) ? desired_speed : -desired_speed;
+  float desired_velocity;
+
+  if (az_profile_manual != MOTION_PROFILE_MANUAL_OFF) {
+
+    // Manual move: there is no target, so the desired speed is simply top speed (L/R) or zero
+    // (soft stop).  Direction comes from the axis we were told to turn, held in the rotation state.
+    if (az_profile_manual == MOTION_PROFILE_MANUAL_STOP) {
+      desired_velocity = 0.0;
+    } else {
+      // Direction comes from az_profile_direction, not from the current rotation state: while a
+      // reversal brakes through zero the axis is still physically turning the old way, and reading
+      // the state here would keep re-commanding the direction we are trying to leave.
+      if (az_profile_direction == CCW) {
+        desired_velocity = -top_speed;
+      } else {
+        desired_velocity = top_speed;
+      }
+    }
+
+  } else {
+
+    // Targeted move: the speed we may carry is set by the distance left to brake in.
+    float distance_to_target = target_raw_azimuth - raw_azimuth;   // signed: + = CW, - = CCW
+    float distance_magnitude = fabs(distance_to_target);
+
+    // Inside the tolerance band the move is done: command zero and let service_rotation()'s target
+    // check stop the axis.  Without this the profile would keep commanding motion across the target
+    // and hunt around it in a limit cycle.
+    if (distance_magnitude <= AZIMUTH_TOLERANCE) {
+      az_profile_velocity = 0.0;
+      return;
+    }
+
+    // v = sqrt(2*a*d) is the fastest we can be going and still stop exactly on target.
+    float braking_velocity = sqrt(2.0 * (float)AZ_MAX_DECELERATION_DPSS * distance_magnitude);
+
+    float desired_speed = (braking_velocity < top_speed) ? braking_velocity : top_speed;
+    desired_velocity = (distance_to_target >= 0.0) ? desired_speed : -desired_speed;
+
+  }
 
   // 3. Ramp the commanded velocity toward that, bounded by accel/decel ---------------------------
   az_profile_velocity = motion_profile_ramp_velocity(az_profile_velocity, desired_velocity,
@@ -11568,17 +11630,34 @@ void service_az_motion_profile(){
                                                      (float)AZ_MAX_DECELERATION_DPSS,
                                                      elapsed_seconds);
 
+  // A soft stop is finished once the ramp itself has reached (near) zero - tested after the ramp, so
+  // it sees this pass's velocity.  Testing before would fire on the very first pass, where the
+  // commanded velocity is still the 0.0 it was seeded with, and cut the motor at full speed.
+  if ((az_profile_manual == MOTION_PROFILE_MANUAL_STOP) &&
+      (fabs(az_profile_velocity) < MOTION_PROFILE_STOPPED_DPS)) {
+    az_profile_velocity = 0.0;
+    az_profile_manual = MOTION_PROFILE_MANUAL_OFF;
+    rotator(DEACTIVATE, CW, 92);
+    rotator(DEACTIVATE, CCW, 92);
+    az_state = IDLE;
+    az_request_queue_state = NONE;
+    #ifdef DEBUG_MOTION_PROFILE
+      debug.println("service_az_motion_profile: soft stop complete");
+    #endif // DEBUG_MOTION_PROFILE
+    return;
+  }
+
   #ifdef DEBUG_MOTION_PROFILE
-    debug.print("service_az_motion_profile: dist:");
-    debug.print(distance_to_target, 2);
+    debug.print("service_az_motion_profile: manual:");
+    debug.print(az_profile_manual);
+    debug.print(" v_want:");
+    debug.print(desired_velocity, 3);
     debug.print(" v_cmd:");
     debug.print(az_profile_velocity, 3);
     debug.print(" v_meas:");
     debug.print(az_measured_velocity, 3);
-    debug.print(" v_brake:");
-    debug.print(braking_velocity, 3);
     debug.print(" elapsed_ms:");
-    debug.print(elapsed_ms);
+    debug.print((int)elapsed_ms);
     debug.println("");
   #endif // DEBUG_MOTION_PROFILE
 
@@ -11613,23 +11692,47 @@ void service_el_motion_profile(){
 
   unsigned long milliseconds = millis();
 
-  if ((el_request_queue_state != IN_PROGRESS_TO_TARGET) ||
-      ((el_state != NORMAL_UP) && (el_state != NORMAL_DOWN) &&
-       (el_state != SLOW_START_UP) && (el_state != SLOW_START_DOWN) &&
-       (el_state != SLOW_DOWN_UP) && (el_state != SLOW_DOWN_DOWN))) {
+  // See service_az_motion_profile() for how manual moves are folded in alongside targeted ones.
+  byte el_in_rotation_state = ((el_state == NORMAL_UP) || (el_state == NORMAL_DOWN) ||
+                               (el_state == SLOW_START_UP) || (el_state == SLOW_START_DOWN) ||
+                               (el_state == SLOW_DOWN_UP) || (el_state == SLOW_DOWN_DOWN));
+
+  byte el_profile_should_run = el_in_rotation_state &&
+                               ((el_request_queue_state == IN_PROGRESS_TO_TARGET) ||
+                                (el_profile_manual != MOTION_PROFILE_MANUAL_OFF));
+
+  if (!el_profile_should_run) {
     if (el_profile_active) {
       el_profile_active = 0;
       el_profile_velocity = 0.0;
       el_measured_velocity = 0.0;
     }
+    if (el_state == IDLE) {   // see the azimuth guard for why this is conditional
+      el_profile_manual = MOTION_PROFILE_MANUAL_OFF;
+    }
     return;
   }
 
-  if (!el_profile_active) {   // first pass of a new profiled move - start from a standstill, see azimuth above
+  if (!el_profile_active) {   // first pass of a new profiled move - see azimuth above
     el_profile_active = 1;
     el_profile_last_update = milliseconds;
     el_profile_last_movement = milliseconds;
     el_profile_last_position = elevation;
+
+    if ((el_profile_manual != MOTION_PROFILE_MANUAL_OFF) && (current_el_state() != NOT_DOING_ANYTHING)) {
+      float seed_speed = fabs(el_measured_velocity);
+      if (seed_speed < MOTION_PROFILE_STOPPED_DPS) {
+        seed_speed = ((float)current_el_speed_voltage / 255.0) * (float)EL_FULL_SPEED_DEG_PER_SEC;
+      }
+      el_profile_velocity = (current_el_state() == ROTATING_DOWN) ? -seed_speed : seed_speed;
+      #ifdef DEBUG_MOTION_PROFILE
+        debug.print("service_el_motion_profile: manual seed v:");
+        debug.print(el_profile_velocity, 3);
+        debug.println("");
+      #endif // DEBUG_MOTION_PROFILE
+      return;
+    }
+
     el_profile_velocity = 0.0;
     el_measured_velocity = 0.0;
     return;
@@ -11655,41 +11758,76 @@ void service_el_motion_profile(){
     }
   }
 
-  float distance_to_target = target_elevation - elevation;   // signed: + = UP, - = DOWN
-  float distance_magnitude = fabs(distance_to_target);
-
-  // Inside tolerance: command zero and let service_rotation() stop the axis - see azimuth above.
-  if (distance_magnitude <= ELEVATION_TOLERANCE) {
-    el_profile_velocity = 0.0;
-    return;
-  }
-
-  float braking_velocity = sqrt(2.0 * (float)EL_MAX_DECELERATION_DPSS * distance_magnitude);
-
+  // Full speed for this axis, from the current speed setting.
   float top_speed = ((float)normal_el_speed_voltage / 255.0) * (float)EL_FULL_SPEED_DEG_PER_SEC;
   if (top_speed <= 0.0) {
     top_speed = (float)EL_FULL_SPEED_DEG_PER_SEC;
   }
 
-  float desired_speed = (braking_velocity < top_speed) ? braking_velocity : top_speed;
-  float desired_velocity = (distance_to_target >= 0.0) ? desired_speed : -desired_speed;
+  float desired_velocity;
+
+  if (el_profile_manual != MOTION_PROFILE_MANUAL_OFF) {
+
+    // Manual move: top speed (U/D) or zero (soft stop), direction from the rotation state.
+    if (el_profile_manual == MOTION_PROFILE_MANUAL_STOP) {
+      desired_velocity = 0.0;
+    } else {
+      // See the azimuth equivalent: direction must come from el_profile_direction, not the state.
+      if (el_profile_direction == DOWN) {
+        desired_velocity = -top_speed;
+      } else {
+        desired_velocity = top_speed;
+      }
+    }
+
+  } else {
+
+    float distance_to_target = target_elevation - elevation;   // signed: + = UP, - = DOWN
+    float distance_magnitude = fabs(distance_to_target);
+
+    if (distance_magnitude <= ELEVATION_TOLERANCE) {
+      el_profile_velocity = 0.0;
+      return;
+    }
+
+    float braking_velocity = sqrt(2.0 * (float)EL_MAX_DECELERATION_DPSS * distance_magnitude);
+
+    float desired_speed = (braking_velocity < top_speed) ? braking_velocity : top_speed;
+    desired_velocity = (distance_to_target >= 0.0) ? desired_speed : -desired_speed;
+
+  }
 
   el_profile_velocity = motion_profile_ramp_velocity(el_profile_velocity, desired_velocity,
                                                      (float)EL_MAX_ACCELERATION_DPSS,
                                                      (float)EL_MAX_DECELERATION_DPSS,
                                                      elapsed_seconds);
 
+  // Tested after the ramp - see the azimuth equivalent for why.
+  if ((el_profile_manual == MOTION_PROFILE_MANUAL_STOP) &&
+      (fabs(el_profile_velocity) < MOTION_PROFILE_STOPPED_DPS)) {
+    el_profile_velocity = 0.0;
+    el_profile_manual = MOTION_PROFILE_MANUAL_OFF;
+    rotator(DEACTIVATE, UP, 92);
+    rotator(DEACTIVATE, DOWN, 92);
+    el_state = IDLE;
+    el_request_queue_state = NONE;
+    #ifdef DEBUG_MOTION_PROFILE
+      debug.println("service_el_motion_profile: soft stop complete");
+    #endif // DEBUG_MOTION_PROFILE
+    return;
+  }
+
   #ifdef DEBUG_MOTION_PROFILE
-    debug.print("service_el_motion_profile: dist:");
-    debug.print(distance_to_target, 2);
+    debug.print("service_el_motion_profile: manual:");
+    debug.print(el_profile_manual);
+    debug.print(" v_want:");
+    debug.print(desired_velocity, 3);
     debug.print(" v_cmd:");
     debug.print(el_profile_velocity, 3);
     debug.print(" v_meas:");
     debug.print(el_measured_velocity, 3);
-    debug.print(" v_brake:");
-    debug.print(braking_velocity, 3);
     debug.print(" elapsed_ms:");
-    debug.print(elapsed_ms);
+    debug.print((int)elapsed_ms);
     debug.println("");
   #endif // DEBUG_MOTION_PROFILE
 
@@ -12395,6 +12533,23 @@ void service_request_queue(){
           deactivate_park();
         #endif // FEATURE_PARK
         if (az_state != IDLE) {
+          #ifdef FEATURE_MOTION_PROFILE
+            // Soft stop under the profile: ramp the velocity down to zero at AZ_MAX_DECELERATION_DPSS
+            // from whatever speed we are actually carrying, then idle the axis.  The profile keeps
+            // the axis in its current NORMAL_* state while it brakes, so it stays in control of the
+            // PWM; a second stop is not a hard stop here - the ramp is already the gentlest way down.
+            // REQUEST_KILL remains the immediate cut (the S command).
+            if (az_slowdown_active) {
+              az_profile_manual = MOTION_PROFILE_MANUAL_STOP;
+              az_request_queue_state = NONE;
+              #ifdef DEBUG_SERVICE_REQUEST_QUEUE
+                if (debug_mode) {
+                  control_port->println();
+                }
+              #endif // DEBUG_SERVICE_REQUEST_QUEUE
+              break;
+            }
+          #endif // FEATURE_MOTION_PROFILE
           if (az_slowdown_active) {
             if ((az_state == TIMED_SLOW_DOWN_CW) || (az_state == TIMED_SLOW_DOWN_CCW) || (az_state == SLOW_DOWN_CW) || (az_state == SLOW_DOWN_CCW)) {  // if we're already in timed slow down and we get another stop, do a hard stop
               rotator(DEACTIVATE, CW, 19);
@@ -12696,6 +12851,24 @@ void service_request_queue(){
         #ifdef FEATURE_PARK
           deactivate_park();
         #endif // FEATURE_PARK
+        #ifdef FEATURE_MOTION_PROFILE
+          // Reversing under the profile: leave the axis in its current rotation state and just ask
+          // for the opposite direction.  The velocity ramp brakes through zero and accelerates the
+          // other way as one continuous move.  Handing this to INITIALIZE_DIR_CHANGE_TO_CW instead
+          // would drop the axis into TIMED_SLOW_DOWN_*, which the profile does not own, bringing
+          // back the full timed stop-then-restart pause.
+          if (az_profile_manual == MOTION_PROFILE_MANUAL_RUN) {
+            az_request_queue_state = NONE;
+            az_last_rotate_initiation = millis();
+            az_profile_direction = CW;
+            #ifdef DEBUG_SERVICE_REQUEST_QUEUE
+              if (debug_mode) {
+                control_port->println();
+              }
+            #endif // DEBUG_SERVICE_REQUEST_QUEUE
+            break;
+          }
+        #endif // FEATURE_MOTION_PROFILE
         if (((az_state == SLOW_START_CCW) || (az_state == NORMAL_CCW) || (az_state == SLOW_DOWN_CCW) || (az_state == TIMED_SLOW_DOWN_CCW)) && (az_slowstart_active)) {
           az_state = INITIALIZE_DIR_CHANGE_TO_CW;
           #ifdef DEBUG_SERVICE_REQUEST_QUEUE
@@ -12713,6 +12886,12 @@ void service_request_queue(){
         }
         az_request_queue_state = NONE;
         az_last_rotate_initiation = millis();
+        #ifdef FEATURE_MOTION_PROFILE
+          // Manual rotation: let the profile ramp the speed under the same accel limit as a
+          // targeted move, instead of the old timed PWM steps.
+          az_profile_manual = MOTION_PROFILE_MANUAL_RUN;
+          az_profile_direction = CW;
+        #endif // FEATURE_MOTION_PROFILE
         #ifdef DEBUG_SERVICE_REQUEST_QUEUE
         if (debug_mode) {
           control_port->println();
@@ -12728,6 +12907,24 @@ void service_request_queue(){
         #ifdef FEATURE_PARK
           deactivate_park();
         #endif // FEATURE_PARK
+        #ifdef FEATURE_MOTION_PROFILE
+          // Reversing under the profile: leave the axis in its current rotation state and just ask
+          // for the opposite direction.  The velocity ramp brakes through zero and accelerates the
+          // other way as one continuous move.  Handing this to INITIALIZE_DIR_CHANGE_TO_CCW instead
+          // would drop the axis into TIMED_SLOW_DOWN_*, which the profile does not own, bringing
+          // back the full timed stop-then-restart pause.
+          if (az_profile_manual == MOTION_PROFILE_MANUAL_RUN) {
+            az_request_queue_state = NONE;
+            az_last_rotate_initiation = millis();
+            az_profile_direction = CCW;
+            #ifdef DEBUG_SERVICE_REQUEST_QUEUE
+              if (debug_mode) {
+                control_port->println();
+              }
+            #endif // DEBUG_SERVICE_REQUEST_QUEUE
+            break;
+          }
+        #endif // FEATURE_MOTION_PROFILE
         if (((az_state == SLOW_START_CW) || (az_state == NORMAL_CW) || (az_state == SLOW_DOWN_CW) || (az_state == TIMED_SLOW_DOWN_CW)) && (az_slowstart_active)) {
           az_state = INITIALIZE_DIR_CHANGE_TO_CCW;
           #ifdef DEBUG_SERVICE_REQUEST_QUEUE
@@ -12743,6 +12940,12 @@ void service_request_queue(){
         }
         az_request_queue_state = NONE;
         az_last_rotate_initiation = millis();
+        #ifdef FEATURE_MOTION_PROFILE
+          // Manual rotation: let the profile ramp the speed under the same accel limit as a
+          // targeted move, instead of the old timed PWM steps.
+          az_profile_manual = MOTION_PROFILE_MANUAL_RUN;
+          az_profile_direction = CCW;
+        #endif // FEATURE_MOTION_PROFILE
         #ifdef DEBUG_SERVICE_REQUEST_QUEUE
         if (debug_mode) {
           control_port->println();
@@ -12762,6 +12965,9 @@ void service_request_queue(){
         rotator(DEACTIVATE, CCW, 26);
         az_state = IDLE;
         az_request_queue_state = NONE;
+        #ifdef FEATURE_MOTION_PROFILE
+          az_profile_manual = MOTION_PROFILE_MANUAL_OFF;   // immediate stop - abandon any ramp
+        #endif // FEATURE_MOTION_PROFILE
         #ifdef DEBUG_SERVICE_REQUEST_QUEUE
         debug.println("");
         #endif // DEBUG_SERVICE_REQUEST_QUEUE
@@ -12914,6 +13120,19 @@ void service_request_queue(){
         #ifdef FEATURE_PARK
           deactivate_park();
         #endif // FEATURE_PARK
+        #ifdef FEATURE_MOTION_PROFILE
+          if (el_profile_manual == MOTION_PROFILE_MANUAL_RUN) {   // see REQUEST_CW for why
+            el_request_queue_state = NONE;
+            el_last_rotate_initiation = millis();
+            el_profile_direction = UP;
+            #ifdef DEBUG_SERVICE_REQUEST_QUEUE
+              if (debug_mode) {
+                control_port->println();
+              }
+            #endif // DEBUG_SERVICE_REQUEST_QUEUE
+            break;
+          }
+        #endif // FEATURE_MOTION_PROFILE
         if (((el_state == SLOW_START_DOWN) || (el_state == NORMAL_DOWN) || (el_state == SLOW_DOWN_DOWN) || (el_state == TIMED_SLOW_DOWN_DOWN)) && (el_slowstart_active)) {
           el_state = INITIALIZE_DIR_CHANGE_TO_UP;
           #ifdef DEBUG_SERVICE_REQUEST_QUEUE
@@ -12930,6 +13149,10 @@ void service_request_queue(){
         }
         el_request_queue_state = NONE;
         el_last_rotate_initiation = millis();
+        #ifdef FEATURE_MOTION_PROFILE
+          el_profile_manual = MOTION_PROFILE_MANUAL_RUN;   // see REQUEST_CW above
+          el_profile_direction = UP;
+        #endif // FEATURE_MOTION_PROFILE
           #ifdef DEBUG_SERVICE_REQUEST_QUEUE
         if (debug_mode) {
           control_port->println();
@@ -12947,6 +13170,19 @@ void service_request_queue(){
         #ifdef FEATURE_PARK
           deactivate_park();
         #endif // FEATURE_PARK
+        #ifdef FEATURE_MOTION_PROFILE
+          if (el_profile_manual == MOTION_PROFILE_MANUAL_RUN) {   // see REQUEST_CW for why
+            el_request_queue_state = NONE;
+            el_last_rotate_initiation = millis();
+            el_profile_direction = DOWN;
+            #ifdef DEBUG_SERVICE_REQUEST_QUEUE
+              if (debug_mode) {
+                control_port->println();
+              }
+            #endif // DEBUG_SERVICE_REQUEST_QUEUE
+            break;
+          }
+        #endif // FEATURE_MOTION_PROFILE
         if (((el_state == SLOW_START_UP) || (el_state == NORMAL_UP) || (el_state == SLOW_DOWN_UP) || (el_state == TIMED_SLOW_DOWN_UP)) && (el_slowstart_active)) {
           el_state = INITIALIZE_DIR_CHANGE_TO_DOWN;
           #ifdef DEBUG_SERVICE_REQUEST_QUEUE
@@ -12963,6 +13199,10 @@ void service_request_queue(){
         }
         el_request_queue_state = NONE;
         el_last_rotate_initiation = millis();
+        #ifdef FEATURE_MOTION_PROFILE
+          el_profile_manual = MOTION_PROFILE_MANUAL_RUN;   // see REQUEST_CW above
+          el_profile_direction = DOWN;
+        #endif // FEATURE_MOTION_PROFILE
         #ifdef DEBUG_SERVICE_REQUEST_QUEUE
         if (debug_mode) {
           control_port->println();
@@ -12981,6 +13221,18 @@ void service_request_queue(){
           deactivate_park();
         #endif // FEATURE_PARK
         if (el_state != IDLE) {
+          #ifdef FEATURE_MOTION_PROFILE
+            if (el_slowdown_active) {   // profiled soft stop - see the azimuth REQUEST_STOP above
+              el_profile_manual = MOTION_PROFILE_MANUAL_STOP;
+              el_request_queue_state = NONE;
+              #ifdef DEBUG_SERVICE_REQUEST_QUEUE
+                if (debug_mode) {
+                  control_port->println();
+                }
+              #endif // DEBUG_SERVICE_REQUEST_QUEUE
+              break;
+            }
+          #endif // FEATURE_MOTION_PROFILE
           if (el_slowdown_active) {
             if ((el_state == TIMED_SLOW_DOWN_UP) || (el_state == TIMED_SLOW_DOWN_DOWN) || (el_state == SLOW_DOWN_UP) || (el_state == SLOW_DOWN_DOWN)) {  // if we're already in timed slow down and we get another stop, do a hard stop
               rotator(DEACTIVATE, UP, 27);
@@ -13028,6 +13280,9 @@ void service_request_queue(){
         rotator(DEACTIVATE, DOWN, 29);
         el_state = IDLE;
         el_request_queue_state = NONE;
+        #ifdef FEATURE_MOTION_PROFILE
+          el_profile_manual = MOTION_PROFILE_MANUAL_OFF;   // immediate stop - abandon any ramp
+        #endif // FEATURE_MOTION_PROFILE
         #ifdef DEBUG_SERVICE_REQUEST_QUEUE
         if (debug_mode) {
           control_port->println();
@@ -19928,9 +20183,11 @@ void stop_rotation(){
     }
   #endif // FEATURE_LIMIT_SENSE_CALIBRATION_RUN
 
-  submit_request(AZ, REQUEST_STOP, 0, DBG_STOP_ROTATION);
+  // The S command is an immediate stop, so it kills rather than ramping down.  REQUEST_STOP is the
+  // soft stop used by A and E, which now decelerates under the motion profile.
+  submit_request(AZ, REQUEST_KILL, 0, DBG_STOP_ROTATION);
   #ifdef FEATURE_ELEVATION_CONTROL
-    submit_request(EL, REQUEST_STOP, 0, DBG_STOP_ROTATION);
+    submit_request(EL, REQUEST_KILL, 0, DBG_STOP_ROTATION);
   #endif
 
 

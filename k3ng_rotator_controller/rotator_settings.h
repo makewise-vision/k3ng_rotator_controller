@@ -86,7 +86,7 @@ You can tweak these, but read the online documentation!
 #define EL_SLOW_DOWN_STEPS 20
 #define EL_INITIALLY_IN_SLOW_DOWN_PWM 50  // PWM value to start at if we're starting in the slow down zone (1 - 255)
 
-#define TIMED_SLOW_DOWN_TIME 2000
+#define TIMED_SLOW_DOWN_TIME 250
 
 // Motion profile settings (FEATURE_MOTION_PROFILE) --------------------------------------------------
 // Trapezoidal velocity profile: the controller ramps velocity at a bounded acceleration instead of
@@ -104,10 +104,10 @@ You can tweak these, but read the online documentation!
 // that is sqrt(2*8*1.0) = 4.0 deg/sec for azimuth - the rotator is cut at that speed and coasts to a
 // halt, so any residual overshoot comes from mechanical inertia, not from the profile.  If the
 // rotator overshoots the target, lower the deceleration (arrive slower) or tighten the tolerance.
-#define AZ_MAX_ACCELERATION_DPSS 30.0      // azimuth acceleration limit (degrees/sec^2)
-#define AZ_MAX_DECELERATION_DPSS 20.0      // azimuth deceleration limit (degrees/sec^2)
-#define EL_MAX_ACCELERATION_DPSS 8.0      // elevation acceleration limit (degrees/sec^2)
-#define EL_MAX_DECELERATION_DPSS 6.0      // elevation deceleration limit (degrees/sec^2)
+#define AZ_MAX_ACCELERATION_DPSS 60.0      // azimuth acceleration limit (degrees/sec^2)
+#define AZ_MAX_DECELERATION_DPSS 120.0      // azimuth deceleration limit (degrees/sec^2)
+#define EL_MAX_ACCELERATION_DPSS 15.0      // elevation acceleration limit (degrees/sec^2)
+#define EL_MAX_DECELERATION_DPSS 30.0      // elevation deceleration limit (degrees/sec^2)
 
 // Full-speed slew rate of the rotator, in degrees/second, at PWM_SPEED_VOLTAGE_X4 (255).
 // Measure this on your hardware: time a large rotation at full speed and divide degrees by seconds.
@@ -121,7 +121,12 @@ You can tweak these, but read the online documentation!
 #define EL_MOTION_PROFILE_MIN_PWM EL_SLOW_DOWN_PWM_STOP     // 0 - 255
 
 // How often the profile recalculates velocity and PWM, in milliseconds.
-#define MOTION_PROFILE_UPDATE_MS 50
+#define MOTION_PROFILE_UPDATE_MS 30
+
+// Commanded speed (degrees/sec) below which a profiled soft stop (the A and E commands, or letting
+// go of a direction button) considers the axis stopped and cuts the motor.  The ramp approaches
+// zero asymptotically in the last step or two, so without a threshold the axis would never idle.
+#define MOTION_PROFILE_STOPPED_DPS 0.5
 
 // Velocity measurement filter: 0.0 = no filtering (noisy), 1.0 = frozen.  Pulse sensors deliver
 // discrete edges, so some smoothing is needed, especially at low speed.
@@ -422,7 +427,7 @@ You can tweak these, but read the online documentation!
 // Changed in 2020.06.26.02
 // Serial Port Settings
 #define CONTROL_PORT_MAPPED_TO &Serial     // change this line to map the control port to a different serial port (Serial1, Serial2, etc.)
-#define CONTROL_PORT_BAUD_RATE 9600
+#define CONTROL_PORT_BAUD_RATE 115200
 //#define REMOTE_PORT Serial3                 // used to control remote unit
 #define REMOTE_UNIT_PORT_BAUD_RATE 9600 
 #define GPS_PORT Serial2
